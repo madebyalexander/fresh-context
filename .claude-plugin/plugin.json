@@ -1,0 +1,12 @@
+{
+  "name": "fresh-context",
+  "version": "0.1.0",
+  "description": "Same quality, fewer tokens: a working-lean skill, /handoff and /tokens commands, and hooks that list handoffs at session start, snapshot work before compaction and at session end, and warn when a session gets large.",
+  "author": {
+    "name": "madebyalexander"
+  },
+  "homepage": "https://github.com/madebyalexander/fresh-context",
+  "repository": "https://github.com/madebyalexander/fresh-context",
+  "license": "MIT",
+  "keywords": ["tokens", "context", "handoff", "compaction", "efficiency", "hooks"]
+}

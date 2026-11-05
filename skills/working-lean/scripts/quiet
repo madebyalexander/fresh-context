@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# quiet: run a command, keep the full log, print only what matters.
+set -u
+
+usage() {
+  cat <<'TXT'
+quiet [-n LINES] <command> [args...]
+  Runs the command with stdout and stderr going to a log file, then prints:
+    exit <code> · <N> lines · full log: <path>
+    --- error lines   (up to 40 lines that look like errors: FAIL, Error:, Traceback, panic:, ...)
+    --- last LINES lines (default 30)
+  Exits with the command's own exit code. The log (mode 600) stays in $TMPDIR for a closer look.
+  Pipes and chains: quiet bash -c 'npm ci && npm test'
+TXT
+}
+
+if [ $# -eq 0 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then usage; exit 0; fi
+n=30
+if [ "$1" = "-n" ]; then
+  case "${2:-}" in
+    ''|*[!0-9]*) echo "quiet: -n needs a whole number" >&2; exit 2 ;;
+  esac
+  n="$2"
+  shift 2
+fi
+if [ $# -eq 0 ]; then echo "quiet: no command given (quiet --help)" >&2; exit 2; fi
+
+tmp="${TMPDIR:-/tmp}"
+tmp="${tmp%/}"
+log="$(mktemp "$tmp/quiet.XXXXXX")" || { echo "quiet: cannot create a log file in $tmp" >&2; exit 2; }
+
+"$@" >"$log" 2>&1
+code=$?
+total=$(wc -l <"$log" | tr -d ' ')
+echo "exit $code · $total lines · full log: $log"
+errs=$(grep -nE '(FAIL|ERROR|Error:|error:|error TS|Exception|Traceback|panic:|fatal:|not ok|[^0-9 ] failed|[1-9][0-9]* failed)' "$log" | head -n 40 | cut -c1-300)
+if [ -n "$errs" ]; then
+  echo "--- error lines"
+  printf '%s\n' "$errs"
+fi
+if [ "$total" -gt 0 ]; then
+  echo "--- last $n lines"
+  tail -n "$n" "$log" | cut -c1-400
+fi
+exit "$code"

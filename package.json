@@ -1,0 +1,31 @@
+{
+  "name": "fresh-context",
+  "version": "0.1.0",
+  "description": "Work in a fresh context with a short handoff: a Claude Code plugin with a working-lean skill, /handoff, /tokens and local session hooks.",
+  "keywords": ["claude-code", "claude-code-plugin", "claude", "tokens", "context", "handoff", "compaction", "hooks", "skills"],
+  "homepage": "https://github.com/madebyalexander/fresh-context#readme",
+  "bugs": "https://github.com/madebyalexander/fresh-context/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/madebyalexander/fresh-context.git"
+  },
+  "license": "MIT",
+  "author": "madebyalexander",
+  "bin": {
+    "fresh-context": "bin/fresh-context.js"
+  },
+  "files": [
+    ".claude-plugin/",
+    "bin/",
+    "hooks/",
+    "skills/",
+    "!**/__pycache__/**",
+    "!**/*.pyc",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,9 @@
+schema_version: "1.1"
+name: noisy-test-output
+expected_outcome: |
+  The run reports the two failing tests, test_parse_date and test_rounding, with the reason
+  for each (the expected and actual values), without pulling the thousands of lines of
+  passing-test noise into the conversation: the command's output is capped or filtered
+  (for example with quiet, tail or grep) instead of being printed in full.
+context:
+  scaffold_script: scaffold.sh

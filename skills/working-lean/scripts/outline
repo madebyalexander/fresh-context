@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""outline <file> [--grep WORD] [--max N] - a file's landmarks with line numbers (functions, classes,
+exports, sections, headings), so you can read just the range you need.
+
+Knows .ts .tsx .js .jsx .mjs .cjs .py .swift .go .rs .rb .md .css .html .json; for anything else it
+lists the non-indented lines. --grep keeps landmarks containing WORD; --max caps the list (default 200)."""
+import json
+import re
+import sys
+
+JS = re.compile(r"^\s*(export\s+(default\s+)?)?((async\s+)?function\b|class\b|interface\b|type\s+\w+\s*=|enum\b|"
+                r"(const|let|var)\s+\w+\s*(:[^=]+)?=\s*(async\s*)?(\(|function|[\w$]+\s*=>|forwardRef|memo|styled))"
+                r"|^\s*//\s*(-{3,}|={3,}|#)")
+PAT = {
+    "py": re.compile(r"^\s*(async\s+)?(def|class)\s+\w+|^#\s*(-{3,}|={3,})"),
+    "swift": re.compile(r"^\s*(@\w+\s+)*((public|private|fileprivate|internal|open)\s+)?((final|static|override)\s+)*"
+                        r"(class|struct|enum|protocol|extension|actor|func|init)\b|^\s*//\s*MARK:|^\s*var\s+body\b"),
+    "go": re.compile(r"^(func|type|const|var)\b"),
+    "rs": re.compile(r"^\s*(pub(\([^)]*\))?\s+)?(fn|struct|enum|trait|impl|mod|macro_rules!)\b"),
+    "rb": re.compile(r"^\s*(def|class|module)\s+\w+"),
+    "md": re.compile(r"^#{1,4}\s"),
+    "css": re.compile(r"^(/\*|@media|@keyframes|@supports|@layer|:root|[^\s{}][^{]*\{)"),
+    "html": re.compile(r"<(section|header|footer|main|nav|h[1-3]|script|style|template)\b|\sid=\"[^\"]+\"", re.I),
+}
+for e in ("ts", "tsx", "js", "jsx", "mjs", "cjs"):
+    PAT[e] = JS
+
+
+def opt(argv, name, default, conv=str):
+    if name not in argv:
+        return default
+    i = argv.index(name)
+    try:
+        return conv(argv[i + 1])
+    except (IndexError, ValueError):
+        print(f"outline: {name} needs a value", file=sys.stderr)
+        sys.exit(2)
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
+    path = argv[0]
+    grep = opt(argv, "--grep", None)
+    grep = grep.lower() if grep else None
+    cap = opt(argv, "--max", 200, int)
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path.rsplit("/", 1)[-1] else ""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError as e:
+        print(f"outline: {e}", file=sys.stderr)
+        return 1
+    lines = text.split("\n")
+    hits = []
+    if ext == "json":
+        try:
+            doc = json.loads(text)
+        except ValueError as e:
+            print(f"outline: not valid JSON: {e}", file=sys.stderr)
+            return 1
+
+        def walk(x, p, depth):
+            if depth > 2:
+                return
+            if isinstance(x, dict):
+                for k, v in x.items():
+                    t = type(v).__name__ + (f"[{len(v)}]" if isinstance(v, (list, dict)) else "")
+                    hits.append((0, f"{p}.{k}".lstrip(".") + " : " + t))
+                    walk(v, f"{p}.{k}", depth + 1)
+            elif isinstance(x, list) and x:
+                walk(x[0], p + "[0]", depth + 1)
+
+        walk(doc, "", 0)
+    else:
+        rx = PAT.get(ext)
+        for i, line in enumerate(lines, 1):
+            if (rx.search(line) if rx else (line and not line[0].isspace())):
+                hits.append((i, line.strip()))
+    if grep:
+        hits = [h for h in hits if grep in h[1].lower()]
+    more = f" (first {cap})" if len(hits) > cap else ""
+    print(f"{path} · {len(lines)} lines · {len(hits)} landmarks{more}")
+    for i, t in hits[:cap]:
+        print(f"{i:>6}  {t[:110]}" if i else f"        {t[:110]}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

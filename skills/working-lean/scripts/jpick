@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""jpick <file|-> [PATH ...] [--max CHARS] - print only the parts of a JSON document you need.
+
+PATH syntax:  a.b.c   items[0].name   items[*].name (every item)   a.* (every value under a)   keys(a)
+With no PATH: the top-level keys and their types. Each result is one line of compact JSON,
+cut at --max characters (default 2000)."""
+import json
+import sys
+
+
+def toks(p):
+    out = []
+    for part in p.replace("]", "").split("."):
+        if not part:
+            continue
+        bits = part.split("[")
+        if bits[0]:
+            out.append(bits[0])
+        for b in bits[1:]:
+            out.append("*" if b == "*" else int(b) if b.lstrip("-").isdigit() else b)
+    return out
+
+
+def get(x, ts):
+    if not ts:
+        return x
+    t, rest = ts[0], ts[1:]
+    if t == "*":
+        vals = x.values() if isinstance(x, dict) else x if isinstance(x, list) else []
+        return [get(v, rest) for v in vals]
+    if isinstance(x, list) and isinstance(t, int):
+        return get(x[t], rest) if -len(x) <= t < len(x) else None
+    if isinstance(x, dict):
+        return get(x.get(t if not isinstance(t, int) else str(t)), rest)
+    return None
+
+
+def kind(v):
+    return type(v).__name__ + (f"[{len(v)}]" if isinstance(v, (list, dict)) else "")
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
+    cap = 2000
+    if "--max" in argv:
+        i = argv.index("--max")
+        try:
+            cap = int(argv[i + 1])
+        except (IndexError, ValueError):
+            print("jpick: --max needs a number", file=sys.stderr)
+            return 2
+        del argv[i:i + 2]
+    src, paths = argv[0], argv[1:]
+    try:
+        if src == "-":
+            doc = json.load(sys.stdin)
+        else:
+            with open(src, encoding="utf-8") as f:
+                doc = json.load(f)
+    except OSError as e:
+        print(f"jpick: {e}", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"jpick: not valid JSON: {e}", file=sys.stderr)
+        return 1
+
+    def show(v):
+        s = json.dumps(v, ensure_ascii=False, separators=(",", ":"))
+        return s if len(s) <= cap else s[:cap] + f"... ({len(s)} chars)"
+
+    if not paths:
+        if isinstance(doc, dict):
+            for k, v in doc.items():
+                print(k, ":", kind(v))
+        else:
+            print(kind(doc))
+    for p in paths:
+        if p.startswith("keys(") and p.endswith(")"):
+            v = get(doc, toks(p[5:-1]))
+            print(p, "=", show(list(v.keys()) if isinstance(v, dict) else None))
+        else:
+            print(p, "=", show(get(doc, toks(p))))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

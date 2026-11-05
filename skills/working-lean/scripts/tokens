@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""tokens - what Claude Code sessions cost, from the transcripts on this machine.
+
+  tokens                 the newest session of the current folder, ask by ask
+  tokens FILE.jsonl      one session transcript, ask by ask
+  tokens -n N            the N newest sessions of the current folder, one line each, plus the average
+  --cwd PATH             use PATH's sessions instead of the current folder's
+  --dir DIR              read transcripts from DIR (default: <config>/projects/<folder>)
+
+Columns: req = model requests; ctx = context sent with a request (input + cache read + cache write);
+re-read = the sum of ctx over the requests (what the conversation re-sent); out = output tokens.
+Reads only local transcript files (CLAUDE_CONFIG_DIR or ~/.claude). It sends nothing anywhere.
+The transcript format is internal to Claude Code and may change; lines it can't read are skipped."""
+import glob
+import json
+import os
+import re
+import sys
+from datetime import datetime
+
+
+def config_dir():
+    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+
+
+def local_time(ts):
+    try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return str(ts)[:16].replace("T", " ")
+
+
+def project_dir(cwd):
+    base = os.path.join(config_dir(), "projects")
+    for slug in (re.sub(r"[^A-Za-z0-9]", "-", cwd), cwd.replace("/", "-").replace(".", "-")):
+        d = os.path.join(base, slug)
+        if os.path.isdir(d):
+            return d
+    return os.path.join(base, re.sub(r"[^A-Za-z0-9]", "-", cwd))
+
+
+COMMAND = re.compile(r"<command-name>(.*?)</command-name>(?:.*?<command-args>(.*?)</command-args>)?", re.S)
+
+
+def prompt_text(content):
+    """The words the user typed (a slash command as typed), or '' for tool results and injected text."""
+    if isinstance(content, str):
+        m = COMMAND.search(content)
+        if m:
+            return f"{m.group(1).strip()} {(m.group(2) or '').strip()}".strip()
+        return "" if content.lstrip().startswith("<") else content
+    if isinstance(content, list):
+        if any(isinstance(c, dict) and c.get("type") == "tool_result" for c in content):
+            return ""
+        parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+        return " ".join(p for p in parts if not p.lstrip().startswith("<"))
+    return ""
+
+
+def load(path):
+    seen, rows, asks = set(), [], []
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(e, dict):
+                continue
+            m = e.get("message") or {}
+            if not isinstance(m, dict):
+                continue
+            if e.get("type") == "user" and not e.get("isMeta") and not e.get("isCompactSummary"):
+                t = prompt_text(m.get("content")).strip()
+                if t:
+                    asks.append((len(rows), local_time(e.get("timestamp", "")), t.replace("\n", " ")[:60]))
+            u = m.get("usage")
+            if e.get("type") == "assistant" and isinstance(u, dict):
+                key = m.get("id") or id(e)
+                if key in seen:
+                    continue
+                seen.add(key)
+                ctx = sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+                rows.append((ctx, int(u.get("output_tokens") or 0)))
+    return rows, asks
+
+
+def k(n):
+    return f"{n // 1000}k"
+
+
+def main(argv):
+    if argv[:1] in (["-h"], ["--help"]):
+        print(__doc__.strip())
+        return 0
+    n, cwd, d, files = None, os.getcwd(), None, []
+    i = 0
+    try:
+        while i < len(argv):
+            a = argv[i]
+            if a == "-n":
+                n = int(argv[i + 1])
+                i += 1
+            elif a == "--cwd":
+                cwd = os.path.abspath(argv[i + 1])
+                i += 1
+            elif a == "--dir":
+                d = argv[i + 1]
+                i += 1
+            else:
+                files.append(a)
+            i += 1
+    except (IndexError, ValueError):
+        print("tokens: bad arguments (tokens --help)", file=sys.stderr)
+        return 2
+    d = d or project_dir(cwd)
+    if n is not None:
+        found = sorted(glob.glob(os.path.join(glob.escape(d), "*.jsonl")), key=os.path.getmtime)[-max(n, 1):]
+        if not found:
+            print(f"tokens: no transcripts in {d}", file=sys.stderr)
+            return 1
+        total_req = total_ctx = 0
+        for f in found:
+            rows, asks = load(f)
+            if not rows:
+                continue
+            ctx = sum(r[0] for r in rows)
+            total_req += len(rows)
+            total_ctx += ctx
+            start = asks[0][1] if asks else ""
+            print(f"{os.path.basename(f)[:8]}  {start:16}  {len(rows):5} req  avg ctx {k(ctx // len(rows)):>5}  "
+                  f"peak {k(max(r[0] for r in rows)):>5}  re-read {ctx / 1e6:6.1f}M  out {k(sum(r[1] for r in rows))}")
+        if total_req:
+            print(f"average context per request over these sessions: {k(total_ctx // total_req)} ({total_req} requests)")
+        return 0
+    if files:
+        path = files[0]
+    else:
+        found = glob.glob(os.path.join(glob.escape(d), "*.jsonl"))
+        if not found:
+            print(f"tokens: no transcripts in {d} (run it from the project folder, or pass --cwd / a .jsonl file)", file=sys.stderr)
+            return 1
+        path = max(found, key=os.path.getmtime)
+    try:
+        rows, asks = load(path)
+    except OSError as e:
+        print(f"tokens: {e}", file=sys.stderr)
+        return 1
+    if not rows:
+        print("tokens: no model requests with usage data in this transcript")
+        return 0
+    bounds = [a[0] for a in asks] + [len(rows)]
+    if not asks or asks[0][0] > 0:
+        bounds = [0] + bounds
+        asks = [(0, "", "(before the first prompt)")] + asks
+    for j, a in enumerate(asks):
+        seg = rows[bounds[j]:bounds[j + 1]]
+        if seg:
+            print(f"{a[1]:16}  {len(seg):4} req  ctx {k(seg[0][0]):>5} -> {k(seg[-1][0]):>5}  "
+                  f"re-read {sum(r[0] for r in seg) / 1e6:6.1f}M  out {k(sum(r[1] for r in seg)):>5}  {a[2]}")
+    ctx = sum(r[0] for r in rows)
+    print(f"total {len(rows)} req · avg ctx {k(ctx // len(rows))} · re-read {ctx / 1e6:.1f}M · out {k(sum(r[1] for r in rows))}")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        sys.exit(130)

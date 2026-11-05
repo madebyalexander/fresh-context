@@ -1,0 +1,9 @@
+{
+  "description": "fresh-context: list handoffs at session start, snapshot before compaction and at session end, warn when a session gets large. Local only; set FRESH_CONTEXT_DISABLE=1 to turn off.",
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/working-lean/scripts/lean_hooks.py\" session-start", "timeout": 10}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/working-lean/scripts/lean_hooks.py\" prompt", "timeout": 5}]}],
+    "PreCompact": [{"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/working-lean/scripts/lean_hooks.py\" snapshot", "timeout": 10}]}],
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/working-lean/scripts/lean_hooks.py\" snapshot", "timeout": 10}]}]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "fresh-context",
+  "description": "Same quality, fewer tokens in Claude Code.",
+  "owner": {
+    "name": "madebyalexander"
+  },
+  "plugins": [
+    {
+      "name": "fresh-context",
+      "source": "./",
+      "description": "Same quality, fewer tokens: working-lean skill, /handoff, /tokens, and local session hooks."
+    }
+  ]
+}
